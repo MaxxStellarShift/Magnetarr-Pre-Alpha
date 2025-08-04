@@ -10,6 +10,8 @@ Open a terminal as an administrator, and past this command :
 
 Then, you'll have to download the fill  *" API.Json "*, **_( ask me to get it )_** & the fill Magnetarr.pyw and
 put them in a same folder
+https://discord.gg/V9Th7F7t4T
+To get API
 _______________________________________________________
 
 __Config__
