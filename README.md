@@ -8,7 +8,7 @@ First, if you want use Magnetarr, you will need to have Python 3.12 or + and ins
 Open a terminal as an administrator, and past this command :
 *pip install google-auth google-api-python-client*
 
-Then, you'll have to download the fill  *" API.Json "*, ( ask me for get it ) & the fill Magnetarr.pyw and
+Then, you'll have to download the fill  *" API.Json "*, **_( ask me to get it )_** & the fill Magnetarr.pyw and
 put them in a same folder
 _______________________________________________________
 
