@@ -1,0 +1,981 @@
+import sys
+import os
+import tkinter as tk
+from tkinter import scrolledtext, messagebox, simpledialog
+from PIL import Image, ImageTk
+import time
+import threading
+import requests
+import json
+from io import BytesIO
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+
+# Masquage de la console Windows
+if sys.platform == "win32":
+    try:
+        import ctypes
+        import ctypes.wintypes
+        # Pour masquer la fenêtre de console
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd != 0:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)  # SW_HIDE = 0
+    except Exception:
+        pass  # On ignore simplement si ça ne marche pas
+
+# ===============================================
+# MAIN CONFIG
+# ===============================================
+
+# Configuration Google Drive
+SERVICE_ACCOUNT_FILE = r'YOUR PATH'#<----Your path here----
+DOSSIER_PARTAGE_ID = '1LvcEMS3ZehjGXYaJaHfNL907J8DyadYz'
+
+# Image de démarrage depuis Google Drive
+IMAGE_DRIVE_ID = '1GZA_ekjQFhrsEj42oOv0AJE9ZKWIfqaC'
+
+# Configuration des utilisateurs
+USERS_JSON_FILE_ID = '1U7g4EHoVtDWT-luW4hEfBMt9IpjrXlKo'
+
+# Template du fichier users.json à créer :
+"""
+{
+    "users": [
+        {
+            "username": "admin",
+            "password": "admin123",
+            "role": "admin",
+            "email": "admin@magnetarr.com"
+        },
+        {
+            "username": "pulsaris",
+            "password": "motdepasse123",
+            "role": "user",
+            "email": "pulsaris@example.com"
+        },
+        {
+            "username": "testuser",
+            "password": "test456",
+            "role": "user",
+            "email": "test@example.com"
+        }
+    ]
+}
+"""
+
+# ===============================================
+# MAIN CLASSS
+# ===============================================
+
+class MagnetarrApp:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Initialisation...")
+        self.root.configure(bg='black')
+        self.root.resizable(False, False)
+        
+        # Paramètres de la fenêtre
+        self.width, self.height = 800, 600
+        
+        # État de l'utilisateur
+        self.current_user = None
+        self.is_logged_in = False
+        
+        # Service Google Drive (sera initialisé au démarrage)
+        self.drive_service = None
+        
+        # Centrer la fenêtre
+        self.center_window()
+        
+        # Variables pour gérer les animations et transitions
+        self.start_time = time.time()
+        self.duration = 9  # Durée totale : 5s d'intro + 4s d'outro
+        self.fade_in_duration = 5  # 5 secondes d'apparition en fondu
+        self.fade_out_duration = 4  # 4 secondes de disparition en fondu
+        self.splash_finished = False
+        self.current_alpha = 0.0
+        
+        # Interface principale
+        self.main_frame = tk.Frame(self.root, bg='black')
+        self.main_frame.pack(fill='both', expand=True)
+        
+        # Démarrer le programme
+        self.start_splash_screen()
+    
+    def center_window(self):
+        """Centrer la fenêtre sur l'écran"""
+        self.root.update_idletasks()
+        x = (self.root.winfo_screenwidth() // 2) - (self.width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (self.height // 2)
+        self.root.geometry(f"{self.width}x{self.height}+{x}+{y}")
+
+# ===============================================
+# GESTION DE L'ÉCRAN DE DÉMARRAGE ET ANIMATIONS
+# ===============================================
+
+    def start_splash_screen(self):
+        """Initialiser et démarrer l'écran de démarrage"""
+        # Préparation du chargement d'image
+        self.image_loaded = False
+        self.photo = None
+        
+        # Zone d'affichage principale
+        self.display_frame = tk.Frame(self.main_frame, bg='black')
+        self.display_frame.pack(fill='both', expand=True)
+        
+        # Chargement de l'image en arrière-plan pour ne pas bloquer l'interface
+        threading.Thread(target=self.load_splash_image, daemon=True).start()
+        
+        # Initialiser Google Drive en arrière-plan
+        threading.Thread(target=self.initialize_drive_service, daemon=True).start()
+        
+        # Démarrer l'animation
+        self.animate_splash()
+    
+    def initialize_drive_service(self):
+        """Initialiser le service Google Drive"""
+        try:
+            print("🔄 Initialisation du service Google Drive...")
+            scopes = ['https://www.googleapis.com/auth/drive']
+            credentials = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+            self.drive_service = build('drive', 'v3', credentials=credentials)
+            print("✅ Service Google Drive initialisé avec succès!")
+        except Exception as e:
+            print(f"❌ Erreur lors de l'initialisation de Google Drive: {e}")
+            self.drive_service = None
+    
+    def load_splash_image(self):
+        """Charger l'image depuis Google Drive"""
+        try:
+            print(f"🔄 Chargement de l'image de démarrage: {IMAGE_DRIVE_ID}")
+            
+            # URL de téléchargement direct depuis Google Drive
+            url = f"https://drive.google.com/uc?export=download&id={IMAGE_DRIVE_ID}"
+            
+            # En-têtes pour éviter d'être bloqué par Google
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=15)
+            
+            if response.status_code == 200:
+                # Traitement de l'image téléchargée
+                img_data = BytesIO(response.content)
+                img = Image.open(img_data)
+                
+                # Ajustement de la taille pour s'adapter à la fenêtre
+                img = img.resize((self.width, self.height), Image.Resampling.LANCZOS)
+                
+                # Conversion pour l'affichage avec tkinter
+                self.photo = ImageTk.PhotoImage(img)
+                
+                # Affichage de l'image sur l'interface principale
+                self.root.after(0, self.create_image_display)
+                
+                print("✅ Image de démarrage chargée avec succès!")
+                
+            else:
+                print(f"❌ Erreur HTTP: {response.status_code}")
+                self.root.after(0, self.create_fallback_splash)
+                
+        except Exception as e:
+            print(f"❌ Erreur chargement image: {e}")
+            self.root.after(0, self.create_fallback_splash)
+    
+    def create_image_display(self):
+        """Créer l'affichage avec l'image"""
+        if self.photo:
+            # On nettoie d'abord l'affichage actuel
+            for widget in self.display_frame.winfo_children():
+                widget.destroy()
+            
+            # Création de l'affichage image
+            self.image_label = tk.Label(
+                self.display_frame, 
+                image=self.photo, 
+                bg='black'
+            )
+            self.image_label.pack(fill='both', expand=True)
+            self.image_loaded = True
+    
+    def create_fallback_splash(self):
+        """Créer l'affichage de secours stylé"""
+        # On nettoie l'affichage pour mettre l'interface de secours
+        for widget in self.display_frame.winfo_children():
+            widget.destroy()
+        
+        # Interface de secours élégante quand l'image ne charge pas
+        container = tk.Frame(self.display_frame, bg='black')
+        container.pack(expand=True)
+        
+        # Logo et titre principal
+        title = tk.Label(
+            container,
+            text="🚀 Magnetarr",
+            font=("Arial", 32, "bold"),
+            fg="#00bc64",
+            bg='black'
+        )
+        title.pack(pady=(100, 10))
+        
+        subtitle = tk.Label(
+            container,
+            text="By Pulsaris Q.",
+            font=("Arial", 18, "italic"),
+            fg="#ffffff6c",
+            bg='black'
+        )
+        subtitle.pack(pady=(0, 50))
+        
+        # Séparateur visuel stylé
+        separator = tk.Label(
+            container,
+            text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            font=("Arial", 12),
+            fg='#444444',
+            bg='black'
+        )
+        separator.pack(pady=20)
+        
+        # Indicateur de chargement
+        init_msg = tk.Label(
+            container,
+            text="Initialisation en cours...",
+            font=("Arial", 16),
+            fg='#888888',
+            bg='black'
+        )
+        init_msg.pack(pady=(20, 100))
+        
+        self.image_loaded = True  # On considère que c'est bon pour l'animation
+    
+    def animate_splash(self):
+        """Animation principale avec fondu d'entrée et de sortie"""
+        elapsed = time.time() - self.start_time
+        
+        # Gestion du timing de l'animation avec les différentes phases
+        if elapsed < self.fade_in_duration:
+            # L'image apparaît progressivement (transparence de 0 à 1)
+            alpha = elapsed / self.fade_in_duration
+        elif elapsed < (self.duration - self.fade_out_duration):
+            # L'image reste visible un moment (transparence à 1)
+            alpha = 1.0
+        elif elapsed < self.duration:
+            # L'image disparaît progressivement (transparence de 1 à 0)
+            fade_progress = (elapsed - (self.duration - self.fade_out_duration)) / self.fade_out_duration
+            alpha = 1.0 - fade_progress
+        else:
+            # Animation terminée, on passe au menu principal
+            if not self.splash_finished:
+                self.splash_finished = True
+                self.show_main_menu()
+            return
+        
+        # Application des effets visuels selon la transparence
+        self.apply_fade_effect(alpha)
+        
+        # Continuer l'animation
+        self.root.after(50, self.animate_splash)
+    
+    def apply_fade_effect(self, alpha):
+        """Appliquer l'effet de fondu"""
+        if alpha != self.current_alpha:
+            self.current_alpha = alpha
+            
+            # On ne change les couleurs que si nécessaire pour optimiser
+            # Calcul de l'intensité : noir total vers un gris très sombre
+            bg_intensity = int(alpha * 25)  # Intensité de 0 à 25 pour un effet subtil
+            bg_color = f"#{bg_intensity:02x}{bg_intensity:02x}{bg_intensity:02x}"
+            
+            # Application des couleurs à toute l'interface
+            self.root.configure(bg=bg_color)
+            self.main_frame.configure(bg=bg_color)
+            
+            # On s'assure que la zone d'affichage a aussi les bonnes couleurs
+            if hasattr(self, 'display_frame'):
+                self.display_frame.configure(bg=bg_color)
+                
+                # Mise à jour récursive de tous les éléments visuels
+                for widget in self.display_frame.winfo_children():
+                    try:
+                        if isinstance(widget, tk.Label):
+                            widget.configure(bg=bg_color)
+                        elif isinstance(widget, tk.Frame):
+                            widget.configure(bg=bg_color)
+                            # Appliquer récursivement aux enfants du frame
+                            for child in widget.winfo_children():
+                                if isinstance(child, (tk.Label, tk.Frame)):
+                                    child.configure(bg=bg_color)
+                    except tk.TclError:
+                        pass  # Ignorer les widgets détruits
+
+# ===============================================
+# GESTION DES UTILISATEURS ET CONNEXION
+# ===============================================
+
+    def load_users_from_drive(self):
+        """Charger les utilisateurs depuis Google Drive"""
+        try:
+            if not self.drive_service:
+                print("❌ Service Google Drive non initialisé")
+                return []
+            
+            print(f"🔄 Chargement des utilisateurs depuis Google Drive: {USERS_JSON_FILE_ID}")
+            
+            # Télécharger le fichier depuis Google Drive
+            request = self.drive_service.files().get_media(fileId=USERS_JSON_FILE_ID)
+            file_content = request.execute()
+            
+            # Décoder le contenu JSON
+            users_data = json.loads(file_content.decode('utf-8'))
+            users = users_data.get('users', [])
+            
+            print(f"✅ {len(users)} utilisateurs chargés depuis Google Drive")
+            return users
+                
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement des utilisateurs depuis Google Drive: {e}")
+            # Retourner des utilisateurs par défaut en cas d'erreur
+            return [
+                {
+                    "username": "admin",
+                    "password": "admin123",
+                    "role": "admin",
+                    "email": "admin@magnetarr.com"
+                },
+                {
+                    "username": "pulsaris",
+                    "password": "motdepasse123",
+                    "role": "user",
+                    "email": "pulsaris@example.com"
+                },
+                {
+                    "username": "testuser",
+                    "password": "test456",
+                    "role": "user",
+                    "email": "test@example.com"
+                }
+            ]
+    
+    def authenticate_user(self, username, password):
+        """Authentifier un utilisateur"""
+        users = self.load_users_from_drive()
+        
+        for user in users:
+            if user['username'] == username and user['password'] == password:
+                return user
+        
+        return None
+    
+    def show_login_dialog(self):
+        """Afficher la boîte de dialogue de connexion"""
+        # Vérifier si Google Drive est disponible
+        if not self.drive_service:
+            messagebox.showerror(
+                "Erreur de connexion", 
+                "Impossible de se connecter à Google Drive.\nVérifiez votre connexion internet et vos credentials."
+            )
+            return
+        
+        # Créer une fenêtre de connexion
+        login_window = tk.Toplevel(self.root)
+        login_window.title("🔑 Connexion à Magnetarr")
+        login_window.configure(bg='#2d2d2d')
+        login_window.resizable(False, False)
+        login_window.geometry("400x300")
+        
+        # Centrer la fenêtre de connexion
+        login_window.transient(self.root)
+        login_window.grab_set()
+        
+        # Variables pour les champs
+        username_var = tk.StringVar()
+        password_var = tk.StringVar()
+        
+        # Titre
+        title_label = tk.Label(
+            login_window,
+            text="🔑 Connexion",
+            font=('Arial', 16, 'bold'),
+            fg='#00ff88',
+            bg='#2d2d2d'
+        )
+        title_label.pack(pady=(20, 30))
+        
+        # Champ nom d'utilisateur
+        username_label = tk.Label(
+            login_window,
+            text="Nom d'utilisateur:",
+            font=('Arial', 11),
+            fg='#ffffff',
+            bg='#2d2d2d'
+        )
+        username_label.pack(pady=(10, 5))
+        
+        username_entry = tk.Entry(
+            login_window,
+            textvariable=username_var,
+            font=('Arial', 11),
+            width=25,
+            bg='#1a1a1a',
+            fg='#ffffff',
+            insertbackground='#ffffff',
+            relief='flat',
+            bd=5
+        )
+        username_entry.pack(pady=(0, 15))
+        username_entry.focus()
+        
+        # Champ mot de passe
+        password_label = tk.Label(
+            login_window,
+            text="Mot de passe:",
+            font=('Arial', 11),
+            fg='#ffffff',
+            bg='#2d2d2d'
+        )
+        password_label.pack(pady=(0, 5))
+        
+        password_entry = tk.Entry(
+            login_window,
+            textvariable=password_var,
+            font=('Arial', 11),
+            width=25,
+            show='*',
+            bg='#1a1a1a',
+            fg='#ffffff',
+            insertbackground='#ffffff',
+            relief='flat',
+            bd=5
+        )
+        password_entry.pack(pady=(0, 20))
+        
+        # Zone des boutons
+        button_frame = tk.Frame(login_window, bg='#2d2d2d')
+        button_frame.pack(pady=20)
+        
+        def attempt_login():
+            """Tentative de connexion"""
+            username = username_var.get().strip()
+            password = password_var.get().strip()
+            
+            if not username or not password:
+                messagebox.showerror("Erreur", "Veuillez remplir tous les champs")
+                return
+            
+            # Afficher un message de chargement
+            login_btn.config(text="🔄 Connexion...", state='disabled')
+            login_window.update()
+            
+            user = self.authenticate_user(username, password)
+            
+            if user:
+                self.current_user = user
+                self.is_logged_in = True
+                login_window.destroy()
+                self.show_main_menu()  # Rafraîchir le menu avec les nouveaux boutons
+                messagebox.showinfo("Succès", f"Bienvenue, {user['username']} !")
+            else:
+                messagebox.showerror("Erreur", "Nom d'utilisateur ou mot de passe incorrect")
+                password_entry.delete(0, tk.END)
+                login_btn.config(text="🔑 Se connecter", state='normal')
+        
+        def cancel_login():
+            """Annuler la connexion"""
+            login_window.destroy()
+        
+        # Bouton Se connecter
+        login_btn = tk.Button(
+            button_frame,
+            text="🔑 Se connecter",
+            command=attempt_login,
+            bg='#4488ff',
+            fg='white',
+            font=('Arial', 11, 'bold'),
+            relief='flat',
+            padx=20,
+            pady=8
+        )
+        login_btn.pack(side='left', padx=10)
+        
+        # Bouton Annuler
+        cancel_btn = tk.Button(
+            button_frame,
+            text="❌ Annuler",
+            command=cancel_login,
+            bg='#ff4444',
+            fg='white',
+            font=('Arial', 11, 'bold'),
+            relief='flat',
+            padx=20,
+            pady=8
+        )
+        cancel_btn.pack(side='left', padx=10)
+        
+        # Permettre la connexion avec Entrée
+        def on_enter(event):
+            attempt_login()
+        
+        login_window.bind('<Return>', on_enter)
+        password_entry.bind('<Return>', on_enter)
+    
+    def logout_user(self):
+        """Déconnecter l'utilisateur"""
+        self.current_user = None
+        self.is_logged_in = False
+        self.show_main_menu()  # Rafraîchir le menu
+        messagebox.showinfo("Déconnexion", "Vous avez été déconnecté avec succès")
+
+# ===============================================
+# GESTION DU MENU PRINCIPAL
+# ===============================================
+
+    def show_main_menu(self):
+        """Afficher le menu principal"""
+        print("🔄 Affichage du menu principal...")
+        
+        # Nettoyer complètement le contenu actuel
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+        
+        # Changer le titre de la fenêtre
+        if self.is_logged_in:
+            self.root.title(f"🚀 Magnetarr - Menu Principal ({self.current_user['username']})")
+        else:
+            self.root.title("🚀 Magnetarr - Menu Principal")
+        
+        # Créer l'interface du menu
+        self.setup_main_menu()
+    
+    def setup_main_menu(self):
+        """Créer l'interface du menu principal"""
+        # === CONFIGURATION VISUELLE DU MENU ===
+        # (Vous pouvez facilement modifier ces couleurs et styles)
+        
+        # Couleurs principales
+        bg_color = '#1a1a1a'           # Fond principal
+        header_color = '#2d2d2d'       # Couleur de l'en-tête
+        accent_color = '#00ff88'       # Couleur d'accentuation (titre)
+        text_color = '#ffffff'         # Couleur du texte
+        button_login = '#4488ff'       # Bouton de connexion
+        button_console = '#ff8844'     # Bouton Console
+        button_logout = '#ff6666'      # Bouton de déconnexion
+        button_discussion = '#88ff44'  # Bouton Discussion
+        button_text = '#ffffff'        # Texte des boutons
+        
+        # Polices
+        title_font = ('Arial', 16, 'bold')
+        button_font = ('Arial', 12, 'bold')
+        
+        # === FIN CONFIGURATION VISUELLE ===
+        
+        # Application des couleurs de base
+        self.root.configure(bg=bg_color)
+        self.main_frame.configure(bg=bg_color)
+        
+        # En-tête avec titre
+        header = tk.Frame(self.main_frame, bg=header_color, height=60)
+        header.pack(fill='x', padx=10, pady=10)
+        header.pack_propagate(False)
+        
+        if self.is_logged_in:
+            title_text = f"🚀 ᴍᴀɢɴᴇᴛᴀʀʀ - Bienvenue {self.current_user['username']}"
+        else:
+            title_text = "🚀 ᴍᴀɢɴᴇᴛᴀʀʀ - Menu Principal"
+        
+        title_label = tk.Label(
+            header,
+            text=title_text,
+            font=title_font,
+            fg=accent_color,
+            bg=header_color
+        )
+        title_label.pack(expand=True)
+        
+        # Zone centrale pour les boutons
+        center_frame = tk.Frame(self.main_frame, bg=bg_color)
+        center_frame.pack(expand=True, fill='both')
+        
+        # Container pour centrer les boutons
+        button_container = tk.Frame(center_frame, bg=bg_color)
+        button_container.pack(expand=True)
+        
+        # Boutons selon l'état de connexion
+        if not self.is_logged_in:
+            # Utilisateur non connecté
+            # Bouton "Se connecter"
+            connect_btn = tk.Button(
+                button_container,
+                text="🔑 Se connecter",
+                command=self.show_login_dialog,
+                bg=button_login,
+                fg=button_text,
+                font=button_font,
+                relief='flat',
+                width=25,
+                height=2,
+                cursor='hand2'
+            )
+            connect_btn.pack(pady=(50, 20))
+            
+            # Bouton "Console"
+            console_btn = tk.Button(
+                button_container,
+                text="💻 Console",
+                command=self.show_console,
+                bg=button_console,
+                fg=button_text,
+                font=button_font,
+                relief='flat',
+                width=25,
+                height=2,
+                cursor='hand2'
+            )
+            console_btn.pack(pady=(0, 50))
+            
+        else:
+            # Utilisateur connecté
+            # Bouton "Se déconnecter"
+            logout_btn = tk.Button(
+                button_container,
+                text="🚪 Se déconnecter",
+                command=self.logout_user,
+                bg=button_logout,
+                fg=button_text,
+                font=button_font,
+                relief='flat',
+                width=25,
+                height=2,
+                cursor='hand2'
+            )
+            logout_btn.pack(pady=(30, 20))
+            
+            # Bouton "Console"
+            console_btn = tk.Button(
+                button_container,
+                text="💻 Console",
+                command=self.show_console,
+                bg=button_console,
+                fg=button_text,
+                font=button_font,
+                relief='flat',
+                width=25,
+                height=2,
+                cursor='hand2'
+            )
+            console_btn.pack(pady=(0, 20))
+            
+            # Bouton "Discussion" (en développement)
+            discussion_btn = tk.Button(
+                button_container,
+                text="💬 Discussion [IN DEV']",
+                command=self.show_discussion_dev,
+                bg=button_discussion,
+                fg=button_text,
+                font=button_font,
+                relief='flat',
+                width=25,
+                height=2,
+                cursor='hand2'
+            )
+            discussion_btn.pack(pady=(0, 30))
+        
+        # Footer avec informations
+        footer = tk.Frame(self.main_frame, bg=header_color, height=40)
+        footer.pack(fill='x', padx=10, pady=(0, 10))
+        footer.pack_propagate(False)
+        
+        footer_label = tk.Label(
+            footer,
+            text="By Pulsaris Quantica | Version 1.0",
+            font=('Arial', 10),
+            fg='#888888',
+            bg=header_color
+        )
+        footer_label.pack(expand=True)
+        
+        # Bouton fermer dans le coin
+        close_btn = tk.Button(
+            footer,
+            text="❌",
+            command=self.on_closing,
+            bg='#ff4444',
+            fg='white',
+            font=('Arial', 8, 'bold'),
+            relief='flat',
+            width=3,
+            height=1
+        )
+        close_btn.pack(side='right', padx=5, pady=5)
+    
+    def show_discussion_dev(self):
+        """Afficher message de développement pour Discussion"""
+        messagebox.showinfo(
+            "En développement", 
+            "💬 La fonctionnalité Discussion est en cours de développement.\n\nElle sera bientôt disponible !"
+        )
+
+# ===============================================
+# GESTION DE LA CONSOLE
+# ===============================================
+
+    def show_console(self):
+        """Transformer la fenêtre en console"""
+        print("🔄 Ouverture de la console...")
+        
+        # Nettoyer complètement le contenu actuel
+        for widget in self.main_frame.winfo_children():
+            widget.destroy()
+        
+        # Changer le titre de la fenêtre
+        self.root.title("🚀 Magnetarr - Console")
+        
+        # Réinitialiser les couleurs
+        self.root.configure(bg='#1a1a1a')
+        self.main_frame.configure(bg='#1a1a1a')
+        
+        # Créer l'interface console dans la même fenêtre
+        self.setup_console_interface()
+        
+        # Lancer le script Google Drive
+        threading.Thread(target=self.run_google_drive_script, daemon=True).start()
+    
+    def setup_console_interface(self):
+        """Configurer l'interface console"""
+        # Header
+        header = tk.Frame(self.main_frame, bg='#2d2d2d', height=40)
+        header.pack(fill='x', padx=5, pady=5)
+        header.pack_propagate(False)
+        
+        title_label = tk.Label(
+            header,
+            text="🚀 ᴍᴀɢɴᴇᴛᴀʀʀ - Console",
+            font=('Arial', 12, 'bold'),
+            fg='#00ff88',
+            bg='#2d2d2d'
+        )
+        title_label.pack(side='left', padx=10, pady=8)
+        
+        # Bouton retour au menu
+        menu_btn = tk.Button(
+            header,
+            text="🏠 Menu",
+            command=self.show_main_menu,
+            bg='#666666',
+            fg='white',
+            font=('Arial', 9, 'bold'),
+            relief='flat',
+            padx=10,
+            pady=2
+        )
+        menu_btn.pack(side='right', padx=10, pady=8)
+        
+        # Console principale
+        console_frame = tk.Frame(self.main_frame, bg='#1a1a1a')
+        console_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        
+        self.console = scrolledtext.ScrolledText(
+            console_frame,
+            bg='#0a0a0a',
+            fg='#00ff00',
+            font=('Consolas', 10),
+            insertbackground='#00ff00',
+            selectbackground='#333333',
+            wrap=tk.WORD,
+            relief='flat',
+            borderwidth=2,
+            state='disabled'  # Rendre la console en lecture seule
+        )
+        self.console.pack(fill='both', expand=True)
+        
+        # Footer avec boutons
+        footer = tk.Frame(self.main_frame, bg='#2d2d2d', height=50)
+        footer.pack(fill='x', padx=5, pady=5)
+        footer.pack_propagate(False)
+        
+        # Bouton fermer
+        close_btn = tk.Button(
+            footer,
+            text="🔸 Fermer",
+            command=self.on_closing,
+            bg='#ff4444',
+            fg='white',
+            font=('Arial', 9, 'bold'),
+            relief='flat',
+            padx=15,
+            pady=5
+        )
+        close_btn.pack(side='right', padx=10, pady=10)
+        
+        # Bouton actualiser
+        refresh_btn = tk.Button(
+            footer,
+            text="🔄 Actualiser",
+            command=self.refresh_console,
+            bg='#4488ff',
+            fg='white',
+            font=('Arial', 9, 'bold'),
+            relief='flat',
+            padx=15,
+            pady=5
+        )
+        refresh_btn.pack(side='right', padx=5, pady=10)
+    
+    def write_to_console(self, text):
+        """Écrire dans la console"""
+        if hasattr(self, 'console'):
+            # Activer temporairement l'édition
+            self.console.config(state='normal')
+            self.console.insert(tk.END, text)
+            self.console.see(tk.END)
+            # Remettre en lecture seule
+            self.console.config(state='disabled')
+            self.root.update_idletasks()
+    
+    def refresh_console(self):
+        """Actualiser la console et relancer le script"""
+        if hasattr(self, 'console'):
+            # Activer temporairement l'édition pour nettoyer
+            self.console.config(state='normal')
+            self.console.delete(1.0, tk.END)
+            # Remettre en lecture seule
+            self.console.config(state='disabled')
+            self.write_to_console("🔄 Actualisation de la console...\n\n")
+            
+            # Relancer le script Google Drive en arrière-plan
+            threading.Thread(target=self.run_google_drive_script, daemon=True).start()
+
+# ===============================================
+# GESTION GOOGLE DRIVE ET FONCTIONNALITÉS
+# ===============================================
+
+    def run_google_drive_script(self):
+        """Exécuter le script Google Drive"""
+        self.write_to_console("🚀 Initialisation du programme...\n")
+        self.write_to_console("=" * 60 + "\n")
+        
+        try:
+            # Vérifier si le service est déjà initialisé
+            if not self.drive_service:
+                # Connexion à Google Drive
+                service = self.connect_to_drive()
+            else:
+                service = self.drive_service
+            
+            # Lister les fichiers
+            self.list_drive_files(service, DOSSIER_PARTAGE_ID)
+            
+            self.write_to_console("=" * 60 + "\n")
+            self.write_to_console("✅ Programme initialisé avec succès !\n")
+            
+        except FileNotFoundError:
+            self.write_to_console(f"❌ Fichier de credentials non trouvé !\n")
+            self.write_to_console(f"📁 Chemin: {SERVICE_ACCOUNT_FILE}\n")
+            self.write_to_console("💡 Vérifiez le chemin du fichier JSON\n\n")
+            
+        except Exception as e:
+            self.write_to_console(f"❌ Erreur: {str(e)}\n")
+            self.write_to_console("💡 Vérifiez vos credentials et permissions\n\n")
+        
+        self.write_to_console("🔸 Console prête. Vous pouvez interagir avec le programme.\n")
+    
+    def connect_to_drive(self):
+        """Se connecter à Google Drive"""
+        self.write_to_console("🔗 Connexion à Google Drive...\n")
+        
+        scopes = ['https://www.googleapis.com/auth/drive']
+        credentials = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=scopes)
+        service = build('drive', 'v3', credentials=credentials)
+        
+        # Sauvegarder le service pour réutilisation
+        self.drive_service = service
+        
+        self.write_to_console("✅ Connecté à Google Drive avec succès !\n\n")
+        return service
+    
+    def list_drive_files(self, service, dossier_id):
+        """Lister les fichiers du dossier partagé"""
+        self.write_to_console(f"📋 Analyse du dossier partagé...\n")
+        
+        try:
+            query = f"'{dossier_id}' in parents and trashed=false"
+            
+            results = service.files().list(
+                q=query,
+                fields="files(id, name, mimeType, size, modifiedTime, owners)",
+                orderBy="modifiedTime desc"
+            ).execute()
+            
+            items = results.get('files', [])
+            
+            if not items:
+                self.write_to_console("📂 Dossier vide - Prêt pour les premières discussions !\n\n")
+                return
+            
+            self.write_to_console(f"📁 {len(items)} éléments trouvés :\n\n")
+            
+            # Séparer et afficher
+            dossiers = [item for item in items if item['mimeType'] == 'application/vnd.google-apps.folder']
+            fichiers = [item for item in items if item['mimeType'] != 'application/vnd.google-apps.folder']
+            
+            if dossiers:
+                self.write_to_console("📂 DOSSIERS :\n")
+                for dossier in dossiers:
+                    self.write_to_console(f"   📁 {dossier['name']}\n")
+            
+            if fichiers:
+                self.write_to_console("\n📄 FICHIERS DE DISCUSSION :\n")
+                for fichier in fichiers[:10]:  # Limiter à 10 pour l'affichage
+                    taille = fichier.get('size', 'N/A')
+                    if taille and taille != 'N/A':
+                        taille = f"{int(taille):,} bytes"
+                    
+                    self.write_to_console(f"   📄 {fichier['name']}\n")
+                    self.write_to_console(f"      Taille: {taille}\n")
+                
+                if len(fichiers) > 10:
+                    self.write_to_console(f"   ... et {len(fichiers) - 10} autres fichiers\n")
+            
+            self.write_to_console("\n")
+                
+        except Exception as e:
+            self.write_to_console(f"❌ Erreur lors de l'analyse: {e}\n\n")
+
+# ===============================================
+# GESTION GÉNÉRALE ET FERMETURE
+# ===============================================
+
+    def on_closing(self):
+        """Gérer la fermeture du programme"""
+        self.root.quit()
+        self.root.destroy()
+    
+    def run(self):
+        """Lancer le programme"""
+        self.root.mainloop()
+
+
+# ===============================================
+# POINT D'ENTRÉE DU PROGRAMME
+# ===============================================
+
+def main():
+    """Fonction principale"""
+    print("🚀 Démarrage du programme Magnetarr...")
+    
+    try:
+        # Créer et lancer l'application
+        app = MagnetarrApp()
+        app.run()
+        
+    except KeyboardInterrupt:
+        print("\n⚠️ Arrêt demandé par l'utilisateur")
+        sys.exit(0)
+    except Exception as e:
+        print(f"❌ Erreur critique: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
