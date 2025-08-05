@@ -9,9 +9,8 @@ Open a terminal as an administrator, and past this command :
 *pip install google-auth google-api-python-client*
 
 Then, you'll have to download the fill  *" API.Json "*, **_( ask me to get it )_** & the fill Magnetarr.pyw and
-put them in a same folder
-https://discord.gg/V9Th7F7t4T
-To get API
+put them in a same folder. | __To get API -> https://discord.gg/V9Th7F7t4T__
+
 _______________________________________________________
 
 __Config__
