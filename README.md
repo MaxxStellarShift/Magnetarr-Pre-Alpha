@@ -1,6 +1,6 @@
 # Magnetarr
 Welcome on this Git page.
-If you're reading that right now, it means that you are about to download Magnetarr. 
+If you're reading that right now, it means that you are about to download an Alpha version of Magnetarr. 
 _______________________________________________________
 __Downloading__
 
